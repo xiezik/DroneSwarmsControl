@@ -1,0 +1,6 @@
+BaseBaseData base_data
+BasePlaneAttr attributes
+BaseAirplaneKinematicsData drone_swarm_kinematics_data
+BaseLoadData load_data
+BaseReconnaissanceData reconnaissance_data
+BaseInterferenceData interference_data

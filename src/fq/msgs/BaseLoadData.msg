@@ -1,0 +1,1 @@
+int32 remaining_projectiles # 载荷数据

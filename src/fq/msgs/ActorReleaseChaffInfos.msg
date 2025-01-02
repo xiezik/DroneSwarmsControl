@@ -1,0 +1,2 @@
+Header header
+ActorReleaseChaffInfo[] release_chaff_infos

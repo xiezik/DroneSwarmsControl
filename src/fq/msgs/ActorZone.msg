@@ -1,0 +1,5 @@
+BaseBaseData base_data
+BaseZoneAttr attributes
+geometry_msgs/Point location
+BaseBeReconnaissanceData be_reconnaissance_data
+BaseBeInterferenceData be_interference_data
