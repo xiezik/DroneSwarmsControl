@@ -4,8 +4,9 @@ from fq.msg import Header, ActorControlInfos,ActorControlInfo, ActorHitInfos ,Ac
 from geometry_msgs.msg import Point
 import threading
 import time
+import math
 
-class MyNode(Node):
+class DroneControlNode(Node):
     def __init__(self):
         super().__init__('my_node')
         self.drone_swarm_control_publisher = self.create_publisher(ActorControlInfos, 'fq/drone_swarm_control_info', 10)
@@ -19,11 +20,16 @@ class MyNode(Node):
             'fq/warship', 
             self.warship_listener_callback,
             10)
+        
+        self.last_timestamp = None  # 上一个时间戳
+        self.time_delta = 0  # 计算时间间隔
+        self.first_ship_received = False  # 是否收到第一个舰船信息
 
         self.warship_sub    
         self.drone_swarm_sub
         self.drone_info = {}
         self.warship_info = {}
+        self.warship_detected_info = {}
         self.first_ship_received = False  # 新增标志变量
         self.first_ship_position = None  # 用于存储第一个舰船的位置
         
@@ -35,7 +41,7 @@ class MyNode(Node):
 
     def control_loop(self):
         dron_swarm_task_path = [[8000.0, -305.0, 60.0], [-1700.0, -305.0, 50.0], [-1270.0, -90.0, 80.0]] 
-        dron_swarm_task_heading = [0.0, 0.0, 0.0] 
+        dron_swarm_task_heading = [0.0, 0.0, 0.0] # 三个路径点的yaw角度
         while rclpy.ok():
             # 等待无人机信息
             # print(self.drone_info)
@@ -132,23 +138,93 @@ class MyNode(Node):
             else:
                 time.sleep(1)
                 print('等待舰船信息')
-                print(self.warship_info)
+                # print(self.warship_info)
                 continue
 
 
 
     def warship_listener_callback(self, warship_msg):
-        # 存储所有舰船的信息
-        for i, warship in enumerate(warship_msg.warships):
+
+        current_time = warship_msg.header.timestamp_sec  # 获取当前时间戳
+
+        # 更新已探测舰船的信息
+        for warship in warship_msg.warships:
             ship_id = warship.base_data.id
-            self.warship_info[i] = {
-                'ship_id': ship_id,
-                'location': warship.kinematics_data.location,
-                'rotation': warship.kinematics_data.rotation,
-                'velocity': 5.0,
-                'ship_type': warship.base_data.type_id,
-                'bounding_box': warship.base_data.bounding_box,
-            }
+
+            # 判断舰船是否在已探测的舰船列表中
+            if ship_id not in self.warship_info:
+                # 如果是新探测到的舰船，记录其初始位置和其他信息
+                self.warship_info[ship_id] = {
+                    'ship_id': ship_id,
+                    'location': warship.kinematics_data.location,
+                    'rotation': warship.kinematics_data.rotation,
+                    'health_point': warship.base_data.health_point,
+                    'velocity': 5.0,  # 固定速度
+                    'ship_type': warship.base_data.type_id,
+                    'bounding_box': warship.base_data.bounding_box,
+                    'last_update_time': current_time  # 记录上次更新的时间
+                }
+            else:
+
+                # 更新舰船位置
+                self.warship_info[ship_id]['location'].x = warship.kinematics_data.location.x
+                self.warship_info[ship_id]['location'].y = warship.kinematics_data.location.y
+                self.warship_info[ship_id]['health_point'].y = warship.base_data.health_point
+
+
+                # 更新最后更新时间戳
+                self.warship_info[ship_id]['last_update_time'] = current_time
+
+        # 在没有探测到某些舰船时，继续使用已知信息进行位置更新
+        for ship_id, ship_data in self.warship_info.items():
+            # 如果当前舰船ID在当前消息中没有出现，则使用它的速度和上次的时间戳更新位置
+            if ship_id not in [warship.base_data.id for warship in warship_msg.warships]:
+                # 获取时间差（秒）
+                time_diff = (current_time - ship_data['last_update_time'])
+                # 使用速度和时间差来更新位置
+                velocity = ship_data['velocity']
+                delta_x = velocity * time_diff * math.cos(ship_data['rotation'].yaw)
+                delta_y = velocity * time_diff * math.sin(ship_data['rotation'].yaw)
+
+                # 更新舰船位置
+                ship_data['location'].x += delta_x
+                ship_data['location'].y += delta_y
+
+                # 更新最后更新时间戳
+                ship_data['last_update_time'] = current_time
+
+
+
+    def update_fleet_position(self, time_delta):
+        if not self.first_ship_received:  # 如果没有探测到任何舰船，返回
+            return
+
+        # 找到第一个探测到的舰船
+        detected_ships = [warship for warship in self.warship_info.values()]
+
+        if not detected_ships:
+            return
+
+        # 计算舰队中心点位置
+        if any(warship['ship_type'] == 'militaryship.cvn_76' for warship in detected_ships):
+            # 以cvn_76类型舰船为中心
+            center_ship = next(warship for warship in detected_ships if warship['ship_type'] == 'militaryship.cvn_76')
+            fleet_center = center_ship['location']
+        else:
+            # 如果没有cvn_76舰船，使用所有探测到的舰船的中点作为中心
+            x_sum = sum(warship['location'].x for warship in detected_ships)
+            y_sum = sum(warship['location'].y for warship in detected_ships)
+            z_sum = sum(warship['location'].z for warship in detected_ships)
+            fleet_center = Point(x=x_sum / len(detected_ships), y=y_sum / len(detected_ships), z=z_sum / len(detected_ships))
+
+        # 计算舰队的航向（假设平行航行，航向由第一个探测到的舰船的rotation决定）
+        first_ship_rotation = detected_ships[0]['rotation']
+        fleet_heading = first_ship_rotation.yaw  # 使用第一个舰船的yaw作为航向
+
+        # 更新舰队的模型信息
+        self.get_logger().info(f'Updated fleet position to center {fleet_center} with heading {fleet_heading}')
+
+        # 此处可以继续处理舰队模型的进一步更新和预测打击逻辑
 
 
     def drone_swarm_listener_callback(self, dron_swarm_msg):
@@ -218,9 +294,9 @@ class MyNode(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    my_node = MyNode()
-    rclpy.spin(my_node)
-    my_node.destroy_node()
+    drone_conrol_node = DroneControlNode()
+    rclpy.spin(drone_conrol_node)
+    drone_conrol_node.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
