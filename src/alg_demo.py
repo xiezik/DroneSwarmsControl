@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 from fq.msg import Header, ActorControlInfos,ActorControlInfo, ActorHitInfos ,ActorAirplanes, ActorBuildings, ActorDroneSwarms, ActorVehicles, ActorWarships, ActorZones
 from geometry_msgs.msg import Point
+from visualization_msgs.msg import Marker, MarkerArray
 import threading
 import time
 import math
@@ -9,6 +10,9 @@ import math
 class DroneControlNode(Node):
     def __init__(self):
         super().__init__('my_node')
+         # 定义可视化发布器
+        self.marker_publisher = self.create_publisher(MarkerArray, 'fq/visualization_markers', 10)
+
         self.drone_swarm_control_publisher = self.create_publisher(ActorControlInfos, 'fq/drone_swarm_control_info', 10)
         self.drone_swarm_sub = self.create_subscription(
             ActorDroneSwarms,
@@ -39,6 +43,10 @@ class DroneControlNode(Node):
         self.control_thread = threading.Thread(target=self.control_loop)
         self.control_thread.start()
 
+        # 启动可视化线程
+        self.visualization_thread = threading.Thread(target=self.visualization_loop)
+        self.visualization_thread.start()
+
     def control_loop(self):
         dron_swarm_task_path = [[8000.0, -305.0, 60.0], [-1700.0, -305.0, 50.0], [-1270.0, -90.0, 80.0]] 
         dron_swarm_task_heading = [0.0, 0.0, 0.0] # 三个路径点的yaw角度
@@ -49,6 +57,7 @@ class DroneControlNode(Node):
                 time.sleep(1)
                 continue
             # 控制Patrol机群（ID范围：500-599）
+            
             self.swarm_control(500, 599, dron_swarm_task_path, dron_swarm_task_heading)
             
             # 控制SuicideRotor机群（ID范围：0-499）
@@ -88,6 +97,63 @@ class DroneControlNode(Node):
                 print('等待舰船信息')
                 # print(self.warship_info)
                 continue
+    def visualization_loop(self):
+        while rclpy.ok():
+            time.sleep(1)  # 延时模拟刷新时间
+            self.publish_visualization()
+            # self.visualize_warships()
+
+
+    def publish_visualization(self):
+        marker_array = MarkerArray()
+
+        # 1. 发布无人机位置
+        for drone_id, drone_data in self.drone_info.items():
+            marker = Marker()
+            marker.header.frame_id = "world"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.id = drone_id
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD
+            marker.pose.position = drone_data['location']
+            marker.scale.x = marker.scale.y = marker.scale.z = 1.0
+            if drone_data['attributes'].load_type == 'SuicideRotor':
+                marker.color.r = 1.0
+                marker.color.g = 0.0
+                marker.color.b = 0.0
+            elif drone_data['attributes'].load_type == 'PatrolRotor':
+                marker.color.r = 0.0
+                marker.color.g = 1.0
+                marker.color.b = 0.0
+            elif drone_data['attributes'].load_type == 'SuicideFixed':
+                marker.color.r = 1.0
+                marker.color.g = 1.0
+                marker.color.b = 0.0
+            elif drone_data['attributes'].load_type == 'Bomber':
+                marker.color.r = 0.0
+                marker.color.g = 1.0
+                marker.color.b = 1.0
+            marker.color.a = 1.0
+            marker_array.markers.append(marker)
+
+        # 2. 发布舰船位置
+        for ship_id, ship_data in self.warship_info.items():
+            marker = Marker()
+            marker.header.frame_id = "world"
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.id = 1000 + ship_id  # 让舰船的 ID 从 1000 开始，避免与无人机重复
+            marker.type = Marker.CUBE
+            marker.action = Marker.ADD
+            marker.pose.position = ship_data['location']
+            marker.scale.x = marker.scale.y = marker.scale.z = 5.0  # 适当放大
+            marker.color.r = 0.0
+            marker.color.g = 0.0
+            marker.color.b = 1.0  # 蓝色
+            marker.color.a = 1.0
+            marker_array.markers.append(marker)
+        # 发布所有Marker
+        self.marker_publisher.publish(marker_array)
+
 
     def swarm_control(self, start_id, end_id, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=False):
         """
