@@ -75,14 +75,17 @@ class DroneControlNode(Node):
         
         while rclpy.ok():
             if self.warship_info:
+                # 获取字典中第一个舰船（按任意顺序）
+                first_warship = next(iter(self.warship_info.values()))
                 for i in range(600 , 899):
                     dron_swarm_control = ActorControlInfo()
                     dron_swarm_control.id = self.drone_info[i]['drone_id']
+                    target_location = first_warship['location']
                     dron_swarm_control.target_positions = [Point(
-                    x=self.warship_info[0]['location'].x, 
-                    y=self.warship_info[0]['location'].y, 
-                    z=min(self.warship_info[0]['location'].z, self.drone_info[i]['attributes'].limit_height)) 
-                    for _ in range(len(dron_swarm_task_path))]
+                        x=target_location.x,
+                        y=target_location.y,
+                        z=min(target_location.z, self.drone_info[i]['attributes'].limit_height)
+                    ) for _ in range(len(dron_swarm_task_path))]
                     
                     dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
                     dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
@@ -91,9 +94,11 @@ class DroneControlNode(Node):
                 self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
                 self.dron_swarms_control.control_info=[]
                 print('侦查到舰船，发送攻击控制信息')
-                break
-            else:
                 time.sleep(1)
+
+                # break
+            else:
+                time.sleep(2)
                 print('等待舰船信息')
                 # print(self.warship_info)
                 continue
@@ -218,7 +223,7 @@ class DroneControlNode(Node):
                 # 更新舰船位置
                 self.warship_info[ship_id]['location'].x = warship.kinematics_data.location.x
                 self.warship_info[ship_id]['location'].y = warship.kinematics_data.location.y
-                self.warship_info[ship_id]['health_point'].y = warship.base_data.health_point
+                self.warship_info[ship_id]['health_point'] = warship.base_data.health_point
 
 
                 # 更新最后更新时间戳
