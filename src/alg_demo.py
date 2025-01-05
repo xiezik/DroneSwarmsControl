@@ -48,69 +48,17 @@ class DroneControlNode(Node):
             if not self.drone_info:
                 time.sleep(1)
                 continue
-            # Patrol机群行为控制
-            for i in range(500 , 599):
-                dron_swarm_control = ActorControlInfo()
-                dron_swarm_control.id = self.drone_info[i]['drone_id']
-                dron_swarm_control.target_positions = [Point(
-                x=self.drone_info[i]['location'].x+5000.0, 
-                y=self.drone_info[i]['location'].y+0.0, 
-                z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)) 
-                for _ in range(len(dron_swarm_task_path))]
-                
-                dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.target_headings = dron_swarm_task_heading
-                self.dron_swarms_control.control_info.append(dron_swarm_control)
+            # 控制Patrol机群（ID范围：500-599）
+            self.swarm_control(500, 599, dron_swarm_task_path, dron_swarm_task_heading)
+            
+            # 控制SuicideRotor机群（ID范围：0-499）
+            self.swarm_control(0, 499, dron_swarm_task_path, dron_swarm_task_heading)
 
-            # SuicideRotor机群行为控制
-            for i in range(0 , 499):
-                dron_swarm_control = ActorControlInfo()
-                dron_swarm_control.id = self.drone_info[i]['drone_id']
-                if self.warship_info:
-                    target_location = self.warship_info[0]['location']
-                else:
-                    target_location = Point(
-                        x=self.drone_info[i]['location'].x+5000.0, 
-                        y=self.drone_info[i]['location'].y+0.0, 
-                        z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)
-                    )
-                dron_swarm_control.target_positions = [target_location for _ in range(len(dron_swarm_task_path))]
-                
-                dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.target_headings = dron_swarm_task_heading
-                self.dron_swarms_control.control_info.append(dron_swarm_control)
+            # 控制SuicideFixed机群（ID范围：600-899）
+            self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading)
 
-            # SuicideFixed机群行为控制
-            for i in range(600 , 899):
-                dron_swarm_control = ActorControlInfo()
-                dron_swarm_control.id = self.drone_info[i]['drone_id']
-                dron_swarm_control.target_positions = [Point(
-                x=self.drone_info[i]['location'].x+5000.0, 
-                y=self.drone_info[i]['location'].y+0.0, 
-                z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)) 
-                for _ in range(len(dron_swarm_task_path))]
-                
-                dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.target_headings = dron_swarm_task_heading
-                self.dron_swarms_control.control_info.append(dron_swarm_control)
-
-            # Bomber机群行为控制
-            for i in range(900 , 999):
-                dron_swarm_control = ActorControlInfo()
-                dron_swarm_control.id = self.drone_info[i]['drone_id']
-                dron_swarm_control.target_positions = [Point(
-                x=self.drone_info[i]['location'].x+5000.0, 
-                y=self.drone_info[i]['location'].y+0.0, 
-                z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)) 
-                for _ in range(len(dron_swarm_task_path))]
-                
-                dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
-                dron_swarm_control.target_headings = dron_swarm_task_heading
-                self.dron_swarms_control.control_info.append(dron_swarm_control)
+            # 控制Bomber机群（ID范围：900-999）
+            self.swarm_control(900, 999, dron_swarm_task_path, dron_swarm_task_heading)
             self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
             self.dron_swarms_control.control_info=[]
 
@@ -140,6 +88,41 @@ class DroneControlNode(Node):
                 print('等待舰船信息')
                 # print(self.warship_info)
                 continue
+
+    def swarm_control(self, start_id, end_id, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=False):
+        """
+        控制蜂群的运动，适应不同类型的机群。
+        
+        :param start_id: 起始ID
+        :param end_id: 结束ID
+        :param dron_swarm_task_path: 任务路径
+        :param dron_swarm_task_heading: 任务航向
+        :param is_attack_mode: 是否进入攻击模式，若为True，则目标为舰船
+        """
+        for i in range(start_id, end_id):
+            dron_swarm_control = ActorControlInfo()
+            dron_swarm_control.id = self.drone_info[i]['drone_id']
+
+            # 如果是攻击模式，目标为舰船，否则目标为默认位置
+            if is_attack_mode and self.warship_info:
+                target_location = self.warship_info[0]['location']
+            else:
+                target_location = Point(
+                    x=self.drone_info[i]['location'].x + 5000.0, 
+                    y=self.drone_info[i]['location'].y + 0.0, 
+                    z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)
+                )
+
+            # 设置目标位置
+            dron_swarm_control.target_positions = [target_location for _ in range(len(dron_swarm_task_path))]
+            
+            # 设置目标速度、最大速度、航向等
+            dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
+            dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
+            dron_swarm_control.target_headings = dron_swarm_task_heading
+            
+            # 添加到控制指令中
+            self.dron_swarms_control.control_info.append(dron_swarm_control)
 
 
 
