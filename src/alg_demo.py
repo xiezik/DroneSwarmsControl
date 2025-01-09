@@ -93,15 +93,17 @@ class DroneControlNode(Node):
                     self.dron_swarms_control.control_info.append(dron_swarm_control)
                 self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
                 self.dron_swarms_control.control_info=[]
-                print('侦查到舰船，发送攻击控制信息')
-                time.sleep(1)
+                # print('侦查到舰船，发送攻击控制信息')
+                time.sleep(2)
 
                 # break
             else:
                 time.sleep(2)
-                print('等待舰船信息')
+                # print('等待舰船信息')
                 # print(self.warship_info)
                 continue
+
+
     def visualization_loop(self):
         while rclpy.ok():
             time.sleep(1)  # 延时模拟刷新时间
@@ -121,7 +123,8 @@ class DroneControlNode(Node):
             marker.type = Marker.SPHERE
             marker.action = Marker.ADD
             marker.pose.position = drone_data['location']
-            marker.scale.x = marker.scale.y = marker.scale.z = 1.0
+            marker.scale.x = marker.scale.y = marker.scale.z = 10.0
+
             if drone_data['attributes'].load_type == 'SuicideRotor':
                 marker.color.r = 1.0
                 marker.color.g = 0.0
@@ -150,7 +153,7 @@ class DroneControlNode(Node):
             marker.type = Marker.CUBE
             marker.action = Marker.ADD
             marker.pose.position = ship_data['location']
-            marker.scale.x = marker.scale.y = marker.scale.z = 5.0  # 适当放大
+            marker.scale.x = marker.scale.y = marker.scale.z = 20.0  # 适当放大
             marker.color.r = 0.0
             marker.color.g = 0.0
             marker.color.b = 1.0  # 蓝色
@@ -177,6 +180,8 @@ class DroneControlNode(Node):
             # 如果是攻击模式，目标为舰船，否则目标为默认位置
             if is_attack_mode and self.warship_info:
                 target_location = self.warship_info[0]['location']
+                target_location.z = min(self.warship_info[0]['bounding_box'].z*0.5, self.drone_info[i]['attributes'].limit_height)
+                print("target_location.z: ",target_location.z)
             else:
                 target_location = Point(
                     x=self.drone_info[i]['location'].x + 5000.0, 
@@ -218,6 +223,8 @@ class DroneControlNode(Node):
                     'bounding_box': warship.base_data.bounding_box,
                     'last_update_time': current_time  # 记录上次更新的时间
                 }
+                print('bounding_box.z = ',self.warship_info[ship_id]['bounding_box'].z*0.5)
+                self.warship_info[ship_id]['location'].z = self.warship_info[ship_id]['bounding_box'].z*0.5
             else:
 
                 # 更新舰船位置
@@ -235,14 +242,19 @@ class DroneControlNode(Node):
             if ship_id not in [warship.base_data.id for warship in warship_msg.warships]:
                 # 获取时间差（秒）
                 time_diff = (current_time - ship_data['last_update_time'])
+
                 # 使用速度和时间差来更新位置
                 velocity = ship_data['velocity']
-                delta_x = velocity * time_diff * math.cos(ship_data['rotation'].yaw)
-                delta_y = velocity * time_diff * math.sin(ship_data['rotation'].yaw)
+                yaw = math.radians(ship_data['rotation'].yaw)
 
+                delta_x = velocity * time_diff * math.cos(yaw)
+                delta_y = velocity * time_diff * math.sin(yaw)
+                # print("rotation",yaw)
                 # 更新舰船位置
                 ship_data['location'].x += delta_x
                 ship_data['location'].y += delta_y
+
+                
 
                 # 更新最后更新时间戳
                 ship_data['last_update_time'] = current_time
@@ -274,7 +286,7 @@ class DroneControlNode(Node):
         # 计算舰队的航向（假设平行航行，航向由第一个探测到的舰船的rotation决定）
         first_ship_rotation = detected_ships[0]['rotation']
         fleet_heading = first_ship_rotation.yaw  # 使用第一个舰船的yaw作为航向
-
+        print("fleet_heading",fleet_heading)
         # 更新舰队的模型信息
         self.get_logger().info(f'Updated fleet position to center {fleet_center} with heading {fleet_heading}')
 
