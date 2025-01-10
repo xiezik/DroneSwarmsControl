@@ -82,7 +82,7 @@ class DroneControlNode(Node):
 
                 self.swarm_control(0, 499, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
 
-                self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+                # self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
 
                 self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
                 self.dron_swarms_control.control_info=[]
@@ -159,42 +159,106 @@ class DroneControlNode(Node):
     def swarm_control(self, start_id, end_id, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=False):
         """
         控制蜂群的运动，适应不同类型的机群。
-        
         :param start_id: 起始ID
         :param end_id: 结束ID
         :param dron_swarm_task_path: 任务路径
         :param dron_swarm_task_heading: 任务航向
         :param is_attack_mode: 是否进入攻击模式，若为True，则目标为舰船
         """
-        for i in range(start_id, end_id):
-            dron_swarm_control = ActorControlInfo()
-            dron_swarm_control.id = self.drone_info[i]['drone_id']
-            
+        # 根据目标舰船数量，决定分配多少无人机
+        if is_attack_mode and self.warship_info:
+            # 目标舰船列表
+            warship_ids = list(self.warship_info.keys())
 
-            # 如果是攻击模式，目标为舰船，否则目标为默认位置
-            if is_attack_mode and self.warship_info:
-                first_warship = next(iter(self.warship_info.values()))
-                target_location = first_warship['location']
-                target_location.z = min(first_warship['location'].z, self.drone_info[i]['attributes'].limit_height)
-                # print("target_location.z: ",target_location.z)
-                                # 获取字典中第一个舰船（按任意顺序）
-            else:
+            # 均匀分配无人机到每个舰船
+            drones_per_ship = (end_id - start_id) // len(warship_ids)
+            for i, warship_id in enumerate(warship_ids):
+                # 获取舰船的位置、速度和航向
+                target_location = self.warship_info[warship_id]['location']
+                target_velocity = self.warship_info[warship_id]['velocity']  # 舰船的速度标量
+                target_heading = self.warship_info[warship_id]['rotation'].yaw  # 舰船的航向角（角度制）
+
+                # 获取该舰船的目标无人机范围
+                swarm_start_id = start_id + i * drones_per_ship
+                swarm_end_id = swarm_start_id + drones_per_ship
+
+                # 设置目标位置
+                num_drones = swarm_end_id - swarm_start_id
+                radius = 50.0  # 巡逻机与舰船的最小距离，可以根据需求调整
+
+                # 计算每个巡逻机的位置，使其均匀分布
+                angle_step = 2 * math.pi / num_drones  # 均匀分布的角度间隔
+
+                # 设置目标位置
+                for j in range(swarm_start_id, swarm_end_id):
+                    if self.drone_info[j]['attributes'].load_type != 'Patrol':
+                        dron_swarm_control = ActorControlInfo()
+                        dron_swarm_control.id = self.drone_info[j]['drone_id']
+
+                        target_location.z = min(target_location.z, self.drone_info[j]['attributes'].limit_height)
+                        dron_swarm_control.target_positions = [target_location for _ in range(3)]
+                        dron_swarm_control.target_velocity = self.drone_info[j]['attributes'].max_velocity
+                        dron_swarm_control.max_velocity = self.drone_info[j]['attributes'].max_velocity
+                        dron_swarm_control.target_headings = dron_swarm_task_heading
+                        self.dron_swarms_control.control_info.append(dron_swarm_control)
+                    else:
+                         # 巡逻机的控制逻辑
+                        dron_swarm_control = ActorControlInfo()
+                        dron_swarm_control.id = self.drone_info[j]['drone_id']
+
+                        # 根据舰船的位置和均匀分布的角度来计算巡逻机的位置
+                        angle = angle_step * (j - swarm_start_id)  # 计算每个巡逻机的角度
+                        patrol_location = Point(
+                            x=target_location.x + radius * math.cos(angle),
+                            y=target_location.y + radius * math.sin(angle),
+                            z=min(target_location.z, self.drone_info[j]['attributes'].limit_height)
+                        )
+
+                        # 计算舰船的速度向量
+                        target_velocity_x = target_velocity * math.cos(math.radians(target_heading))
+                        target_velocity_y = target_velocity * math.sin(math.radians(target_heading))
+
+                        # 计算巡逻机与舰船的相对速度
+                        drone_velocity_x = self.drone_info[j]['attributes'].velocity * math.cos(math.radians(self.drone_info[j]['rotation'].yaw))
+                        drone_velocity_y = self.drone_info[j]['attributes'].velocity * math.sin(math.radians(self.drone_info[j]['rotation'].yaw))
+
+                        # 计算巡逻机的相对速度
+                        relative_velocity_x = target_velocity_x - drone_velocity_x
+                        relative_velocity_y = target_velocity_y - drone_velocity_y
+
+                        # 计算巡逻机需要调整的速度
+                        relative_speed = math.sqrt(relative_velocity_x ** 2 + relative_velocity_y ** 2)
+                        patrol_velocity = 5.0 + (relative_speed / 10.0)  # 速度范围在 5 到 20 之间，动态调整
+
+                        # 确保速度在 5 到 20 之间
+                        patrol_velocity = max(5, min(20, patrol_velocity))
+
+                        # 设置目标位置和速度
+                        dron_swarm_control.target_positions = [patrol_location for _ in range(3)]
+                        dron_swarm_control.target_velocity = patrol_velocity
+                        dron_swarm_control.max_velocity = self.drone_info[j]['attributes'].max_velocity
+
+                        # 设置巡逻机的航向，使其跟随舰船的方向
+                        patrol_heading = target_heading  # 跟随舰船的航向
+                        dron_swarm_control.target_headings = patrol_heading
+                        self.dron_swarms_control.control_info.append(dron_swarm_control)
+
+        else:
+            # 普通模式的控制逻辑
+            for i in range(start_id, end_id):
+                dron_swarm_control = ActorControlInfo()
+                dron_swarm_control.id = self.drone_info[i]['drone_id']
                 target_location = Point(
-                    x=self.drone_info[i]['location'].x + 5000.0, 
-                    y=self.drone_info[i]['location'].y + 0.0, 
+                    x=self.drone_info[i]['location'].x + 5000.0,
+                    y=self.drone_info[i]['location'].y + 0.0,
                     z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)
                 )
+                dron_swarm_control.target_positions = [target_location for _ in range(3)]
+                dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
+                dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
+                dron_swarm_control.target_headings = dron_swarm_task_heading
+                self.dron_swarms_control.control_info.append(dron_swarm_control)
 
-            # 设置目标位置
-            dron_swarm_control.target_positions = [target_location for _ in range(3)]
-            
-            # 设置目标速度、最大速度、航向等
-            dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
-            dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
-            dron_swarm_control.target_headings = dron_swarm_task_heading
-            
-            # 添加到控制指令中
-            self.dron_swarms_control.control_info.append(dron_swarm_control)
 
 
 
@@ -305,6 +369,7 @@ class DroneControlNode(Node):
                 print("drone_id: ",drone_id)
                 self.drone_info[drone_id] = {
                     'drone_id': drone_id,
+                    'bounding_box': dron_swarm.base_data.bounding_box,
                     'location': dron_swarm.drone_swarm_kinematics_data.location,
                     'rotation': dron_swarm.drone_swarm_kinematics_data.rotation,
                     'velocity': dron_swarm.drone_swarm_kinematics_data.velocity,
@@ -333,47 +398,6 @@ class DroneControlNode(Node):
         
         dron_swarms_control = ActorControlInfos()
         dron_swarms_control.header = dron_swarm_msg.header
-
-        '''
-         fq.msg.ActorDroneSwarm(
-                    base_data=fq.msg.BaseBaseData(
-                                id=3, 
-                                health_point=20, 
-                                type_id='airplane.mini3.entity', 
-                                actor_type='EntityAirplane', 
-                                bounding_box=fq.msg.BaseBoundingBox(x=0.19449999928474426, y=0.16050000488758087, z=0.029999999329447746), b_target=False), 
-                    attributes=fq.msg.BasePlaneAttr(
-                                airfoil_type='Rotor', 
-                                load_type='SuicideRotor', 
-                                min_velocity=0.0, 
-                                max_velocity=10.0, 
-                                max_acceleration=2.0, 
-                                max_deceleration=2.0, 
-                                max_roll_angle=0.0, 
-                                max_pitch_angle=0.0, 
-                                roll_rate=0.0, 
-                                pitch_rate=0.0, 
-                                yaw_rate_to_max_roll=20.0, 
-                                limit_height=60.0, 
-                                health_point=20, 
-                                damage_value=20, 
-                                reconnaissance_radius=20.0, 
-                                reconnaissance_angle=0.0, 
-                                bombload=0, 
-                                bomb_range=0.0, 
-                                bomb_velocity=0.0, 
-                                bomb_cold_down_time=0.0), 
-                    drone_swarm_kinematics_data=fq.msg.BaseAirplaneKinematicsData(
-                                location=geometry_msgs.msg.Point(x=-3000.0, y=0.0, z=10.0), 
-                                rotation=fq.msg.BaseOrientation3D(roll=0.0, pitch=0.0, yaw=0.0), 
-                                velocity=geometry_msgs.msg.Twist(linear=geometry_msgs.msg.Vector3(x=0.0, y=0.0, z=0.0), angular=geometry_msgs.msg.Vector3(x=0.0, y=0.0, z=0.0)), 
-                                angular_velocity=geometry_msgs.msg.Twist(linear=geometry_msgs.msg.Vector3(x=0.0, y=0.0, z=0.0), angular=geometry_msgs.msg.Vector3(x=0.0, y=0.0, z=0.0)), 
-                                acceleration=geometry_msgs.msg.Accel(linear=geometry_msgs.msg.Vector3(x=0.0, y=0.0, z=0.0), angular=geometry_msgs.msg.Vector3(x=0.0, y=0.0, z=0.0))), 
-                                load_data=fq.msg.BaseLoadData(remaining_projectiles=0), 
-                                reconnaissance_data=fq.msg.BaseReconnaissanceData(targets=[], num=0), 
-                                interference_data=fq.msg.BaseInterferenceData(targets=[], num=0)
-                    )
-        '''
     
     def equipment_listener_callback(self, equipment_msg):
         pass
