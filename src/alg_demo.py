@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from fq.msg import Header, ActorControlInfos,ActorControlInfo, ActorHitInfos ,ActorAirplanes, ActorBuildings, ActorDroneSwarms, ActorVehicles, ActorWarships, ActorZones
+from fq.msg import Header, ActorControlInfos,ActorControlInfo, ActorHitInfos ,ActorAirplanes, ActorBuildings, ActorDroneSwarms, ActorVehicles, ActorWarships, ActorZones, ActorEquipments
 from geometry_msgs.msg import Point
 from visualization_msgs.msg import Marker, MarkerArray
 import threading
@@ -23,6 +23,11 @@ class DroneControlNode(Node):
             ActorWarships,
             'fq/warship', 
             self.warship_listener_callback,
+            10)
+        self.special_eqirement_sub = self.create_subscription(
+            ActorEquipments,
+            'fq/warship', 
+            self.equipment_listener_callback,
             10)
         
         self.last_timestamp = None  # 上一个时间戳
@@ -369,6 +374,9 @@ class DroneControlNode(Node):
                                 interference_data=fq.msg.BaseInterferenceData(targets=[], num=0)
                     )
         '''
+    
+    def equipment_listener_callback(self, equipment_msg):
+        pass
 
 
 def main(args=None):
