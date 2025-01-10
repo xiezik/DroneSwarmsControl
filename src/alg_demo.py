@@ -27,7 +27,6 @@ class DroneControlNode(Node):
         
         self.last_timestamp = None  # 上一个时间戳
         self.time_delta = 0  # 计算时间间隔
-        self.first_ship_received = False  # 是否收到第一个舰船信息
 
         self.warship_sub    
         self.drone_swarm_sub
@@ -54,7 +53,7 @@ class DroneControlNode(Node):
             # 等待无人机信息
             # print(self.drone_info)
             if not self.drone_info:
-                time.sleep(1)
+                time.sleep(2)
                 continue
             # 控制Patrol机群（ID范围：500-599）
             
@@ -75,25 +74,14 @@ class DroneControlNode(Node):
         
         while rclpy.ok():
             if self.warship_info:
-                # 获取字典中第一个舰船（按任意顺序）
-                first_warship = next(iter(self.warship_info.values()))
-                for i in range(600 , 899):
-                    dron_swarm_control = ActorControlInfo()
-                    dron_swarm_control.id = self.drone_info[i]['drone_id']
-                    target_location = first_warship['location']
-                    dron_swarm_control.target_positions = [Point(
-                        x=target_location.x,
-                        y=target_location.y,
-                        z=min(target_location.z, self.drone_info[i]['attributes'].limit_height)
-                    ) for _ in range(len(dron_swarm_task_path))]
-                    
-                    dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
-                    dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
-                    dron_swarm_control.target_headings = dron_swarm_task_heading
-                    self.dron_swarms_control.control_info.append(dron_swarm_control)
+
+                self.swarm_control(0, 499, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+
+                self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+
                 self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
                 self.dron_swarms_control.control_info=[]
-                # print('侦查到舰船，发送攻击控制信息')
+                print('侦查到舰船，发送攻击控制信息')
                 time.sleep(2)
 
                 # break
@@ -106,7 +94,7 @@ class DroneControlNode(Node):
 
     def visualization_loop(self):
         while rclpy.ok():
-            time.sleep(1)  # 延时模拟刷新时间
+            time.sleep(2)  # 延时模拟刷新时间
             self.publish_visualization()
             # self.visualize_warships()
 
@@ -176,12 +164,15 @@ class DroneControlNode(Node):
         for i in range(start_id, end_id):
             dron_swarm_control = ActorControlInfo()
             dron_swarm_control.id = self.drone_info[i]['drone_id']
+            
 
             # 如果是攻击模式，目标为舰船，否则目标为默认位置
             if is_attack_mode and self.warship_info:
-                target_location = self.warship_info[0]['location']
-                target_location.z = min(self.warship_info[0]['bounding_box'].z*0.5, self.drone_info[i]['attributes'].limit_height)
-                print("target_location.z: ",target_location.z)
+                first_warship = next(iter(self.warship_info.values()))
+                target_location = first_warship['location']
+                target_location.z = min(first_warship['location'].z, self.drone_info[i]['attributes'].limit_height)
+                # print("target_location.z: ",target_location.z)
+                                # 获取字典中第一个舰船（按任意顺序）
             else:
                 target_location = Point(
                     x=self.drone_info[i]['location'].x + 5000.0, 
@@ -190,7 +181,7 @@ class DroneControlNode(Node):
                 )
 
             # 设置目标位置
-            dron_swarm_control.target_positions = [target_location for _ in range(len(dron_swarm_task_path))]
+            dron_swarm_control.target_positions = [target_location for _ in range(3)]
             
             # 设置目标速度、最大速度、航向等
             dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
@@ -212,6 +203,7 @@ class DroneControlNode(Node):
 
             # 判断舰船是否在已探测的舰船列表中
             if ship_id not in self.warship_info:
+                self.first_ship_received = True
                 # 如果是新探测到的舰船，记录其初始位置和其他信息
                 self.warship_info[ship_id] = {
                     'ship_id': ship_id,
@@ -223,7 +215,7 @@ class DroneControlNode(Node):
                     'bounding_box': warship.base_data.bounding_box,
                     'last_update_time': current_time  # 记录上次更新的时间
                 }
-                print('bounding_box.z = ',self.warship_info[ship_id]['bounding_box'].z*0.5)
+                # print('bounding_box.z = ',self.warship_info[ship_id]['bounding_box'].z*0.5)
                 self.warship_info[ship_id]['location'].z = self.warship_info[ship_id]['bounding_box'].z*0.5
             else:
 
@@ -258,6 +250,9 @@ class DroneControlNode(Node):
 
                 # 更新最后更新时间戳
                 ship_data['last_update_time'] = current_time
+        
+        # 更新舰队位置
+        self.update_fleet_position(current_time)
 
 
 
@@ -286,9 +281,9 @@ class DroneControlNode(Node):
         # 计算舰队的航向（假设平行航行，航向由第一个探测到的舰船的rotation决定）
         first_ship_rotation = detected_ships[0]['rotation']
         fleet_heading = first_ship_rotation.yaw  # 使用第一个舰船的yaw作为航向
-        print("fleet_heading",fleet_heading)
+        # print("fleet_heading",fleet_heading)
         # 更新舰队的模型信息
-        self.get_logger().info(f'Updated fleet position to center {fleet_center} with heading {fleet_heading}')
+        # self.get_logger().info(f'Updated fleet position to center {fleet_center} with heading {fleet_heading}')
 
         # 此处可以继续处理舰队模型的进一步更新和预测打击逻辑
 
@@ -297,21 +292,39 @@ class DroneControlNode(Node):
         # self.get_logger().info('我收到了: "%s"' % dron_swarm_msg)
         self.dron_swarms_control.header = dron_swarm_msg.header
 
+        # print("drone_num: ",len(dron_swarm_msg.drone_swarms))
         # 存储所有无人机的信息
-        for i, dron_swarm in enumerate(dron_swarm_msg.drone_swarms):
-            drone_id = dron_swarm.base_data.id
-            self.drone_info[i] = {
-                'drone_id': drone_id,
-                'location': dron_swarm.drone_swarm_kinematics_data.location,
-                'rotation': dron_swarm.drone_swarm_kinematics_data.rotation,
-                'velocity': dron_swarm.drone_swarm_kinematics_data.velocity,
-                'angular_velocity': dron_swarm.drone_swarm_kinematics_data.angular_velocity,
-                'acceleration': dron_swarm.drone_swarm_kinematics_data.acceleration,
-                'attributes': dron_swarm.attributes,
-                'load_data': dron_swarm.load_data,
-                'reconnaissance_data': dron_swarm.reconnaissance_data,
-                'interference_data': dron_swarm.interference_data
-            }
+        if not self.drone_info:
+            for i, dron_swarm in enumerate(dron_swarm_msg.drone_swarms):
+                drone_id = dron_swarm.base_data.id - 3
+                print("drone_id: ",drone_id)
+                self.drone_info[drone_id] = {
+                    'drone_id': drone_id,
+                    'location': dron_swarm.drone_swarm_kinematics_data.location,
+                    'rotation': dron_swarm.drone_swarm_kinematics_data.rotation,
+                    'velocity': dron_swarm.drone_swarm_kinematics_data.velocity,
+                    'angular_velocity': dron_swarm.drone_swarm_kinematics_data.angular_velocity,
+                    'acceleration': dron_swarm.drone_swarm_kinematics_data.acceleration,
+                    'attributes': dron_swarm.attributes,
+                    'load_data': dron_swarm.load_data,
+                    'reconnaissance_data': dron_swarm.reconnaissance_data,
+                    'interference_data': dron_swarm.interference_data
+                }
+        else:
+            for dron_swarm in dron_swarm_msg.drone_swarms:
+                drone_id = dron_swarm.base_data.id - 3
+                self.drone_info[drone_id].update({
+                    'location': dron_swarm.drone_swarm_kinematics_data.location,
+                    'rotation': dron_swarm.drone_swarm_kinematics_data.rotation,
+                    'velocity': dron_swarm.drone_swarm_kinematics_data.velocity,
+                    'angular_velocity': dron_swarm.drone_swarm_kinematics_data.angular_velocity,
+                    'acceleration': dron_swarm.drone_swarm_kinematics_data.acceleration,
+                    'attributes': dron_swarm.attributes,
+                    'load_data': dron_swarm.load_data,
+                    'reconnaissance_data': dron_swarm.reconnaissance_data,
+                    'interference_data': dron_swarm.interference_data
+                })
+                
         
         dron_swarms_control = ActorControlInfos()
         dron_swarms_control.header = dron_swarm_msg.header
