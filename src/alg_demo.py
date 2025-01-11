@@ -26,7 +26,7 @@ class DroneControlNode(Node):
             10)
         self.special_eqirement_sub = self.create_subscription(
             ActorEquipments,
-            'fq/warship', 
+            'fq/equipment', 
             self.equipment_listener_callback,
             10)
         
@@ -37,6 +37,7 @@ class DroneControlNode(Node):
         self.drone_swarm_sub
         self.drone_info = {}
         self.warship_info = {}
+        self.equipment_info = {}
         self.warship_detected_info = {}
         self.first_ship_received = False  # 新增标志变量
         self.first_ship_position = None  # 用于存储第一个舰船的位置
@@ -55,13 +56,14 @@ class DroneControlNode(Node):
         dron_swarm_task_path = [[8000.0, -305.0, 60.0], [-1700.0, -305.0, 50.0], [-1270.0, -90.0, 80.0]] 
         dron_swarm_task_heading = [0.0, 0.0, 0.0] # 三个路径点的yaw角度
         while rclpy.ok():
+
             # 等待无人机信息
             # print(self.drone_info)
             if not self.drone_info:
                 time.sleep(2)
                 continue
+
             # 控制Patrol机群（ID范围：500-599）
-            
             self.swarm_control(500, 599, dron_swarm_task_path, dron_swarm_task_heading)
             
             # 控制SuicideRotor机群（ID范围：0-499）
@@ -82,7 +84,11 @@ class DroneControlNode(Node):
 
                 self.swarm_control(0, 499, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
 
-                # self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+                self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+
+                self.swarm_control(900, 999, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+
+
 
                 self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
                 self.dron_swarms_control.control_info=[]
@@ -366,7 +372,7 @@ class DroneControlNode(Node):
         if not self.drone_info:
             for i, dron_swarm in enumerate(dron_swarm_msg.drone_swarms):
                 drone_id = dron_swarm.base_data.id - 3
-                print("drone_id: ",drone_id)
+                # print("drone_id: ",drone_id)
                 self.drone_info[drone_id] = {
                     'drone_id': drone_id,
                     'bounding_box': dron_swarm.base_data.bounding_box,
@@ -400,7 +406,17 @@ class DroneControlNode(Node):
         dron_swarms_control.header = dron_swarm_msg.header
     
     def equipment_listener_callback(self, equipment_msg):
-        pass
+        for equipment in equipment_msg.equipments:
+            equipment_id = equipment.base_data.id
+            print("equipment_id: ",equipment_id)
+            self.equipment_info[equipment_id] = {
+                'equipment_id': equipment_id,
+                'location': equipment.kinematics_data.location,
+                'rotation': equipment.kinematics_data.rotation,
+                'health_point': equipment.base_data.health_point,
+                'type_id': equipment.base_data.type_id,
+                'bounding_box': equipment.base_data.bounding_box,
+            }
 
 
 def main(args=None):
