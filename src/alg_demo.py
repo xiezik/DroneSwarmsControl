@@ -374,7 +374,7 @@ class DroneControlNode(Node):
                 drone_id = dron_swarm.base_data.id - 3
                 # print("drone_id: ",drone_id)
                 self.drone_info[drone_id] = {
-                    'drone_id': drone_id,
+                    'drone_id': drone_id + 3,
                     'bounding_box': dron_swarm.base_data.bounding_box,
                     'location': dron_swarm.drone_swarm_kinematics_data.location,
                     'rotation': dron_swarm.drone_swarm_kinematics_data.rotation,
