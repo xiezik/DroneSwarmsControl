@@ -16,6 +16,10 @@ port、host、scenario_name要按照自己实际情况设置
 python3 src/alg_demo.py
 ```
 
+```bash
+source ros2_alg_bridge/install/setup.zsh
+```
+
 ## TODO
 ~~环境状态信息回调函数~~
 

@@ -44,6 +44,8 @@ class DroneControlNode(Node):
         
         self.dron_swarms_control = ActorControlInfos()
 
+        self.drone_swarm_info = {}
+
         # 启动控制线程
         self.control_thread = threading.Thread(target=self.control_loop)
         self.control_thread.start()
@@ -64,16 +66,17 @@ class DroneControlNode(Node):
                 continue
 
             # 控制Patrol机群（ID范围：500-599）
-            self.swarm_control(500, 599, dron_swarm_task_path, dron_swarm_task_heading)
+            self.swarm_control(500, 599, dron_swarm_task_heading)
             
             # 控制SuicideRotor机群（ID范围：0-499）
-            self.swarm_control(0, 499, dron_swarm_task_path, dron_swarm_task_heading)
+            # self.swarm_control(0, 499, dron_swarm_task_heading)
 
             # 控制SuicideFixed机群（ID范围：600-899）
-            self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading)
+            # self.swarm_control(600, 899, dron_swarm_task_heading)
+            self.swarm_control(600, 630, dron_swarm_task_heading)
 
             # 控制Bomber机群（ID范围：900-999）
-            self.swarm_control(900, 999, dron_swarm_task_path, dron_swarm_task_heading)
+            # self.swarm_control(900, 999, dron_swarm_task_heading)
             self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
             self.dron_swarms_control.control_info=[]
 
@@ -82,17 +85,18 @@ class DroneControlNode(Node):
         while rclpy.ok():
             if self.warship_info:
 
-                self.swarm_control(0, 499, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+                # self.swarm_control(0, 499, dron_swarm_task_heading, is_attack_mode=True)
 
-                self.swarm_control(600, 899, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+                # self.swarm_control(600, 899, dron_swarm_task_heading, is_attack_mode=True)
+                self.swarm_control(600, 630, dron_swarm_task_heading, is_attack_mode=True)
 
-                self.swarm_control(900, 999, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=True)
+                # self.swarm_control(900, 999, dron_swarm_task_heading, is_attack_mode=True)
 
 
 
                 self.drone_swarm_control_publisher.publish(self.dron_swarms_control)
                 self.dron_swarms_control.control_info=[]
-                print('侦查到舰船，发送攻击控制信息')
+                # print('侦查到舰船，发送攻击控制信息')
                 time.sleep(2)
 
                 # break
@@ -162,14 +166,14 @@ class DroneControlNode(Node):
         self.marker_publisher.publish(marker_array)
 
 
-    def swarm_control(self, start_id, end_id, dron_swarm_task_path, dron_swarm_task_heading, is_attack_mode=False):
+    def swarm_control(self, start_id, end_id, dron_swarm_task_heading, is_attack_mode=False, drones_per_equipment=10):
         """
         控制蜂群的运动，适应不同类型的机群。
         :param start_id: 起始ID
         :param end_id: 结束ID
         :param dron_swarm_task_path: 任务路径
         :param dron_swarm_task_heading: 任务航向
-        :param is_attack_mode: 是否进入攻击模式，若为True，则目标为舰船
+        :param is_attack_mode: 是否进入攻击模式,若为True,则目标为舰船
         """
         # 根据目标舰船数量，决定分配多少无人机
         if is_attack_mode and self.warship_info:
@@ -178,76 +182,44 @@ class DroneControlNode(Node):
 
             # 均匀分配无人机到每个舰船
             drones_per_ship = (end_id - start_id) // len(warship_ids)
+            assigned_drones = start_id
+            available_drones = end_id - start_id    
             for i, warship_id in enumerate(warship_ids):
                 # 获取舰船的位置、速度和航向
-                target_location = self.warship_info[warship_id]['location']
-                target_velocity = self.warship_info[warship_id]['velocity']  # 舰船的速度标量
-                target_heading = self.warship_info[warship_id]['rotation'].yaw  # 舰船的航向角（角度制）
+                target_ship_location = self.warship_info[warship_id]['location']
+                target_ship_velocity = self.warship_info[warship_id]['velocity']  # 舰船的速度标量
+                target_ship_heading = self.warship_info[warship_id]['rotation'].yaw  # 舰船的航向角（角度制）
 
-                # 获取该舰船的目标无人机范围
-                swarm_start_id = start_id + i * drones_per_ship
-                swarm_end_id = swarm_start_id + drones_per_ship
+                print('舰船所属的equipemnt_ids:',self.warship_info[warship_id]['equipment_ids'])
 
-                # 设置目标位置
-                num_drones = swarm_end_id - swarm_start_id
-                radius = 50.0  # 巡逻机与舰船的最小距离，可以根据需求调整
-
-                # 计算每个巡逻机的位置，使其均匀分布
-                angle_step = 2 * math.pi / num_drones  # 均匀分布的角度间隔
-
-                # 设置目标位置
-                for j in range(swarm_start_id, swarm_end_id):
-                    if self.drone_info[j]['attributes'].load_type != 'Patrol':
-                        dron_swarm_control = ActorControlInfo()
-                        dron_swarm_control.id = self.drone_info[j]['drone_id']
-
-                        target_location.z = min(target_location.z, self.drone_info[j]['attributes'].limit_height)
-                        dron_swarm_control.target_positions = [target_location for _ in range(3)]
-                        dron_swarm_control.target_velocity = self.drone_info[j]['attributes'].max_velocity
-                        dron_swarm_control.max_velocity = self.drone_info[j]['attributes'].max_velocity
-                        dron_swarm_control.target_headings = dron_swarm_task_heading
-                        self.dron_swarms_control.control_info.append(dron_swarm_control)
-                    else:
-                         # 巡逻机的控制逻辑
-                        dron_swarm_control = ActorControlInfo()
-                        dron_swarm_control.id = self.drone_info[j]['drone_id']
-
-                        # 根据舰船的位置和均匀分布的角度来计算巡逻机的位置
-                        angle = angle_step * (j - swarm_start_id)  # 计算每个巡逻机的角度
-                        patrol_location = Point(
-                            x=target_location.x + radius * math.cos(angle),
-                            y=target_location.y + radius * math.sin(angle),
-                            z=min(target_location.z, self.drone_info[j]['attributes'].limit_height)
-                        )
-
-                        # 计算舰船的速度向量
-                        target_velocity_x = target_velocity * math.cos(math.radians(target_heading))
-                        target_velocity_y = target_velocity * math.sin(math.radians(target_heading))
-
-                        # 计算巡逻机与舰船的相对速度
-                        drone_velocity_x = self.drone_info[j]['attributes'].velocity * math.cos(math.radians(self.drone_info[j]['rotation'].yaw))
-                        drone_velocity_y = self.drone_info[j]['attributes'].velocity * math.sin(math.radians(self.drone_info[j]['rotation'].yaw))
-
-                        # 计算巡逻机的相对速度
-                        relative_velocity_x = target_velocity_x - drone_velocity_x
-                        relative_velocity_y = target_velocity_y - drone_velocity_y
-
-                        # 计算巡逻机需要调整的速度
-                        relative_speed = math.sqrt(relative_velocity_x ** 2 + relative_velocity_y ** 2)
-                        patrol_velocity = 5.0 + (relative_speed / 10.0)  # 速度范围在 5 到 20 之间，动态调整
-
-                        # 确保速度在 5 到 20 之间
-                        patrol_velocity = max(5, min(20, patrol_velocity))
-
-                        # 设置目标位置和速度
-                        dron_swarm_control.target_positions = [patrol_location for _ in range(3)]
-                        dron_swarm_control.target_velocity = patrol_velocity
-                        dron_swarm_control.max_velocity = self.drone_info[j]['attributes'].max_velocity
-
-                        # 设置巡逻机的航向，使其跟随舰船的方向
-                        patrol_heading = target_heading  # 跟随舰船的航向
-                        dron_swarm_control.target_headings = patrol_heading
-                        self.dron_swarms_control.control_info.append(dron_swarm_control)
+                if 'equipment_ids' in self.warship_info[warship_id]:
+                    for equipment_id in self.warship_info[warship_id]['equipment_ids']:
+                        print('available_drones:',available_drones)
+                        if available_drones <= 0:
+                            break
+                        num_drones = min(drones_per_equipment, available_drones)
+                        if 'equipment_relative_positions' in self.warship_info[warship_id]:
+                                relative_location = self.warship_info[warship_id]['equipment_relative_positions'][equipment_id]
+                                target_ship_location = self.warship_info[warship_id]['location']
+                                target_location = Point(
+                                    x=target_ship_location.x + relative_location.x,
+                                    y=target_ship_location.y + relative_location.y,
+                                    z=min(target_ship_location.z + relative_location.z, self.drone_info[assigned_drones]['attributes'].limit_height)
+                                )
+                                # 获取设备的相对位置
+                                # 设置目标位置
+                                for j in range(assigned_drones, assigned_drones + num_drones):
+                                    if self.drone_info[j]['attributes'].load_type!= 'Patrol':
+                                        self.drone_info[j]['equipment_ids'] = equipment_id
+                                        dron_swarm_control = ActorControlInfo()
+                                        dron_swarm_control.id = self.drone_info[j]['drone_id']
+                                        dron_swarm_control.target_positions = [target_location for _ in range(3)]
+                                        dron_swarm_control.target_velocity = self.drone_info[j]['attributes'].max_velocity
+                                        dron_swarm_control.max_velocity = self.drone_info[j]['attributes'].max_velocity
+                                        dron_swarm_control.target_headings = dron_swarm_task_heading
+                                        self.dron_swarms_control.control_info.append(dron_swarm_control)
+                                assigned_drones += num_drones
+                                available_drones -= num_drones
 
         else:
             # 普通模式的控制逻辑
@@ -257,13 +229,38 @@ class DroneControlNode(Node):
                 target_location = Point(
                     x=self.drone_info[i]['location'].x + 5000.0,
                     y=self.drone_info[i]['location'].y + 0.0,
-                    z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)
+                    # z=min(self.drone_info[i]['location'].z, self.drone_info[i]['attributes'].limit_height)
+                    z=min(21, self.drone_info[i]['attributes'].limit_height)
                 )
                 dron_swarm_control.target_positions = [target_location for _ in range(3)]
                 dron_swarm_control.target_velocity = self.drone_info[i]['attributes'].max_velocity
                 dron_swarm_control.max_velocity = self.drone_info[i]['attributes'].max_velocity
                 dron_swarm_control.target_headings = dron_swarm_task_heading
                 self.dron_swarms_control.control_info.append(dron_swarm_control)
+
+    def allocate_drone_swarms(self, start_id, end_id, swarm_size):
+        """
+        按照 start_id 和 end_id 对无人机进行小蜂群分配和记录
+        :param start_id: 起始 ID
+        :param end_id: 结束 ID
+        :param swarm_size: 小蜂群包含的无人机数量
+        """
+        swarm_index = 0
+        for i in range(start_id, end_id):
+            if i % swarm_size == 0:
+                leader_id = i
+                self.drone_swarm_info[swarm_index] = {
+                    'leader_id': leader_id,
+                    'drone_ids': [],
+                    'assigned_to_equipment': False
+                }
+                self.drone_info[leader_id]['is_leader'] = True
+                self.drone_info[leader_id]['assigned_to_swarm'] = True
+                swarm_index += 1
+            else:
+                self.drone_info[i]['is_leader'] = False
+                self.drone_info[i]['assigned_to_swarm'] = True
+                self.drone_swarm_info[swarm_index - 1]['drone_ids'].append(i)
 
 
 
@@ -288,7 +285,9 @@ class DroneControlNode(Node):
                     'velocity': 5.0,  # 固定速度
                     'ship_type': warship.base_data.type_id,
                     'bounding_box': warship.base_data.bounding_box,
-                    'last_update_time': current_time  # 记录上次更新的时间
+                    'last_update_time': current_time,  # 记录上次更新的时间
+                    'equipment_ids': [],  # 存储属于该舰船的打击设施的ID
+                    'equipment_relative_positions': {}  # 存储设备相对于舰船的相对位置
                 }
                 # print('bounding_box.z = ',self.warship_info[ship_id]['bounding_box'].z*0.5)
                 self.warship_info[ship_id]['location'].z = self.warship_info[ship_id]['bounding_box'].z*0.5
@@ -384,7 +383,9 @@ class DroneControlNode(Node):
                     'attributes': dron_swarm.attributes,
                     'load_data': dron_swarm.load_data,
                     'reconnaissance_data': dron_swarm.reconnaissance_data,
-                    'interference_data': dron_swarm.interference_data
+                    'interference_data': dron_swarm.interference_data,
+                    'is_leader': False,  # 新增是否是领机标志
+                    'assigned_to_swarm': False  # 新增是否被分配到小蜂群标志
                 }
         else:
             for dron_swarm in dron_swarm_msg.drone_swarms:
@@ -407,17 +408,53 @@ class DroneControlNode(Node):
     
     def equipment_listener_callback(self, equipment_msg):
         for equipment in equipment_msg.equipments:
-            equipment_id = equipment.base_data.id
-            print("equipment_id: ",equipment_id)
-            self.equipment_info[equipment_id] = {
-                'equipment_id': equipment_id,
-                'location': equipment.kinematics_data.location,
-                'rotation': equipment.kinematics_data.rotation,
-                'health_point': equipment.base_data.health_point,
-                'type_id': equipment.base_data.type_id,
-                'bounding_box': equipment.base_data.bounding_box,
-            }
+            equipment_id = equipment.base_data.id - 1011
+            if equipment_id not in self.equipment_info:
+                self.equipment_info[equipment_id] = {
+                    'equipment_id': equipment_id,
+                    'location': equipment.kinematics_data.location,
+                    'rotation': equipment.kinematics_data.rotation,
+                    'health_point': equipment.base_data.health_point,
+                    'type_id': equipment.base_data.type_id,
+                    'bounding_box': equipment.base_data.bounding_box,
+                    'ship_id': None
+                }
+            else:
+                self.equipment_info[equipment_id]['location'] = equipment.kinematics_data.location
+                self.equipment_info[equipment_id]['health_point'] = equipment.base_data.health_point
 
+            # 尝试将设备关联到最近的舰船
+            min_distance = float('inf')
+            nearest_ship_id = None
+            for ship_id, ship_data in self.warship_info.items():
+                ship_location = ship_data['location']
+                equipment_location = equipment.kinematics_data.location
+                # 计算设备与舰船之间的欧几里得距离
+                distance = math.sqrt((ship_location.x - equipment_location.x) ** 2 + 
+                                (ship_location.y - equipment_location.y) ** 2 + 
+                                (ship_location.z - equipment_location.z) ** 2)
+                if distance < min_distance:
+                    min_distance = distance
+                    nearest_ship_id = ship_id
+            if nearest_ship_id:
+                # 将设备的 ID 添加到相应舰船的 equipment_ids 列表中
+                if 'equipment_ids' in self.warship_info[nearest_ship_id] and equipment_id not in self.warship_info[nearest_ship_id]['equipment_ids']:
+                    self.warship_info[nearest_ship_id]['equipment_ids'].append(equipment_id)
+                else:
+                    self.warship_info[nearest_ship_id]['equipment_ids'] = [equipment_id]
+                # 计算设备相对于舰船的相对位置
+                equipment_location = self.equipment_info[equipment_id]['location']
+                ship_location = self.warship_info[nearest_ship_id]['location']
+                relative_location = Point(
+                    x=equipment_location.x - ship_location.x,
+                    y=equipment_location.y - ship_location.y,
+                    z=equipment_location.z - ship_location.z
+                )
+                if 'equipment_relative_positions' in self.warship_info[nearest_ship_id]:
+                    self.warship_info[nearest_ship_id]['equipment_relative_positions'][equipment_id] = relative_location
+                else:
+                    self.warship_info[nearest_ship_id]['equipment_relative_positions'] = {equipment_id: relative_location}
+                self.equipment_info[equipment_id]['ship_id'] = nearest_ship_id
 
 def main(args=None):
     rclpy.init(args=args)
